@@ -1,81 +1,85 @@
-# BPE Tokenizer + Mineral Adı Üretme
+# BPE Tokenizer + Mineral Name Generator
 
-Bu klasör, ödevin iki parçasını birleştirir:
+A small end-to-end language-modelling project in two parts:
 
-1. **Kendi metnimizle BPE tokenizer** — 4104 mineral adı üzerinde byte-level BPE
-   (Byte-Pair Encoding) tokenizer eğitildi.
-2. **Minyatür model eğitimi** — reponun `TinyQwen` (Qwen3 tarzı) modeli, char-seviyeli
-   tokenizer yerine bu BPE tokenizer'ı kullanarak yeni mineral adları üretmeyi öğrendi.
+1. **A BPE tokenizer trained on my own corpus**: a byte-level BPE (Byte-Pair Encoding)
+   tokenizer trained on 4,104 mineral names.
+2. **Training a tiny language model**: a Qwen3-style transformer (`TinyQwen`) that uses
+   this BPE tokenizer instead of a character-level one and learns to generate new,
+   realistic mineral names.
 
-Referans: [HuggingFace LLM Course — Bölüm 6/5 (BPE)](https://huggingface.co/learn/llm-course/en/chapter6/5)
-ve reponun kökündeki `train_hf_tokenizer.py`.
+Reference: [Hugging Face LLM Course, Chapter 6.5 (BPE)](https://huggingface.co/learn/llm-course/en/chapter6/5).
 
-## Neden BPE? (char-seviyeliden farkı)
+## Why BPE? (vs. character-level)
 
-Reponun varsayılanı **char-seviyeli**: her token tek bir harf. BPE ise verideki en sık
-geçen harf çiftlerini adım adım birleştirerek **alt-kelime (subword)** token'ları öğrenir.
-Minerallerde bu çok işe yarar; çünkü adların büyük kısmı `-ite`, `-lite`, `-ine` gibi
-eklerle biter ve BPE bunları tek token yapar:
+A character-level tokenizer treats every letter as a token. BPE instead learns
+**subword** tokens by repeatedly merging the most frequent pairs of symbols in the data.
+This works well for minerals, because most names end in suffixes such as `-ite`,
+`-lite` or `-ine`, which BPE learns as single tokens:
 
 ```
-abelsonite -> ['ab', 'el', 'sonite']      (3 token)
-pyrite     -> ['p', 'y', 'rite']          (3 token)
-aegirine   -> ['a', 'e', 'g', 'ir', 'ine'] (5 token)
+abelsonite -> ['ab', 'el', 'sonite']       (3 tokens)
+pyrite     -> ['p', 'y', 'rite']           (3 tokens)
+aegirine   -> ['a', 'e', 'g', 'ir', 'ine'] (5 tokens)
 ```
 
-## Dosyalar
+## Files
 
-| Dosya | Ne yapar |
-| ----- | -------- |
-| `mineraller.txt` | Veri: 4104 mineral adı, küçük harf, satır başına bir ad |
-| `train_bpe_tokenizer.py` | BPE tokenizer'ı eğitir → `mineral_bpe.json` + `mineral_bpe_hf/` |
-| `bpe_tokenizer.py` | Tokenizer'ı reponun arayüzüne saran `BPETokenizer` sınıfı |
-| `train.py` | `TinyQwen`'i BPE token'larıyla eğitir → `tiny_qwen_mineral.pt` |
-| `generate.py` | Checkpoint'ten yeni mineral adları üretir |
-| `qwen3_model/` | Model mimarisi (Qwen3 tarzı). [malibayram/single_letter_transformers](https://github.com/malibayram/single_letter_transformers) reposunun `qwen3/` klasöründen kopyalandı |
+| File | What it does |
+| ---- | ------------ |
+| `mineraller.txt` | Data: 4,104 mineral names, lowercase, one per line |
+| `train_bpe_tokenizer.py` | Trains the BPE tokenizer → `mineral_bpe.json` + `mineral_bpe_hf/` |
+| `bpe_tokenizer.py` | `BPETokenizer` class that wraps the trained tokenizer for the model |
+| `train.py` | Trains `TinyQwen` on the BPE tokens → `tiny_qwen_mineral.pt` |
+| `generate.py` | Generates new mineral names from the checkpoint |
+| `qwen3_model/` | Model architecture (Qwen3-style), adapted from the `qwen3/` folder of [malibayram/single_letter_transformers](https://github.com/malibayram/single_letter_transformers) |
 
-> Bu klasör **self-contained**'dır: `qwen3_model/` sayesinde çalışmak için başka
-> bir repoya ihtiyaç duymaz. Tek başına GitHub'a yüklenebilir.
+The repository is self-contained: thanks to `qwen3_model/`, it does not depend on any
+other repository.
 
-## Çalıştırma
+## Getting started
+
+Requirements: Python 3.9+ with `torch`, `tokenizers` and `transformers`.
 
 ```bash
-# 1) BPE tokenizer'ı eğit (sözlük boyutu 512)
+pip install torch tokenizers transformers
+
+# 1) Train the BPE tokenizer (vocabulary size 512)
 python3 train_bpe_tokenizer.py
 
-# 2) Modeli eğit (~3000 adım, CPU'da birkaç saniye)
+# 2) Train the model (~3,000 steps, a few seconds on CPU)
 python3 train.py
 
-# 3) Yeni mineral adları üret
-python3 generate.py 20        # 20 ad
-python3 generate.py 30 0.6    # düşük temperature = daha "güvenli" adlar
+# 3) Generate new mineral names
+python3 generate.py 20        # 20 names
+python3 generate.py 30 0.6    # lower temperature = "safer" names
 ```
 
-> Not: torch + tokenizers + transformers'ın hepsinin bulunduğu bir Python gerekir.
-> Bu makinede `/usr/bin/python3` (3.9) uygundu.
+## Results (sample run, CPU)
 
-## Sonuçlar (örnek çalışma, CPU)
+- Loss: from the uniform baseline `ln 512 ≈ 6.24` down to **~2.48**
+- **97%** of generated names are **new**, i.e. not in the training data (not memorised)
+- **96%** of generated names end in `-ite`, following real mineral naming conventions
 
-- Kayıp (loss): tekdüze taban `ln 512 ≈ 6.24` → **~2.48**
-- Üretilenlerin **%97'si** eğitim verisinde olmayan **yeni** adlar (ezber değil)
-- Üretilenlerin **%96'sı** gerçek mineral geleneğine uygun `-ite` ile bitiyor
-
-Örnek üretimler:
+Sample outputs:
 
 ```
 molybdite, kogatovite, krinite, khaniite, habsite,
 jasplaite, kallionite, nickelinikite, spertsite, felbenbachite
 ```
 
-## Nasıl çalışıyor? (kısa akış)
+## How it works
 
 ```
 mineraller.txt
-   │  train_bpe_tokenizer.py  (byte-level BPE, vocab=512, özel token: <bos> <eos> ...)
+   │  train_bpe_tokenizer.py  (byte-level BPE, vocab = 512, special tokens: <bos> <eos> ...)
    ▼
 mineral_bpe.json  ──►  BPETokenizer.encode("pyrite") = [p, y, rite]
    │
-   │  train.py: korpus = her adın ardına <eos>  →  TinyQwen (Qwen3: RMSNorm, GQA, RoPE, SwiGLU)
+   │  train.py: corpus = every name followed by <eos>  →  TinyQwen (Qwen3: RMSNorm, GQA, RoPE, SwiGLU)
    ▼
-tiny_qwen_mineral.pt  ──►  generate.py: <eos>'tan başla, <eos>'ta dur  →  yeni ad
+tiny_qwen_mineral.pt  ──►  generate.py: start from <eos>, stop at <eos>  →  new name
 ```
+
+Each name is followed by an `<eos>` token, so the model learns where one name ends and
+the next begins. Generation starts from `<eos>` and stops at the next `<eos>`.
